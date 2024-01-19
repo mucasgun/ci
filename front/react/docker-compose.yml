@@ -1,0 +1,13 @@
+version: "2"
+services:
+  nginx_react:
+    container_name: nginx_react_app
+    #build: .
+    
+    #для сборки вручную раскомментировать блок #build:(3 строки) ниже и закомментировать строку image: docker.infra.cloveri.com/cloveri.start/step/step_front/prod:latest  
+    #build:
+    #  context: .
+    #  dockerfile: Dockerfile
+    image: docker.infra.cloveri.com/cloveri.start/step/step_front/prod:latest  
+    ports:
+      - 8081:80

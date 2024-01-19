@@ -1,0 +1,9 @@
+version: '3.3'
+services:
+  nextjs_service:     
+    container_name: nextjs_app     
+    #для сборки вручную раскомментировать строку'#build: .' ниже и закомментировать строку 'image: docker.infra.cloveri.com/cl...'
+    #build: .
+    image: docker.infra.cloveri.com/cloveri.start/step/step_kabinet/prod:latest
+    ports:
+      - "3000:3000"

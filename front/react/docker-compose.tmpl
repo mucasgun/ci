@@ -1,0 +1,8 @@
+version: "2"
+services:
+  nginx_react:
+    container_name: nginx_react_app
+    image: ${DP_URL}/${CI_PROJECT_PATH}/stage:latest  
+    restart: unless-stopped
+    ports:
+      - 8081:80

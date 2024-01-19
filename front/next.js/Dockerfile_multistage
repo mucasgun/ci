@@ -1,0 +1,36 @@
+###Stage 1###
+
+#FROM node:18.18.2
+FROM node:18.18.2-alpine as base
+RUN apk add --no-cache g++ make py3-pip libc6-compat
+WORKDIR /app
+COPY package.json package-lock.json ./
+#ENV NODE_ENV production
+RUN npm install --maxsockets=1  
+
+#RUN npm ci --maxsockets=1 --production
+
+###Stage 2###
+FROM node:18.18.2-alpine as builder
+WORKDIR /app
+COPY --from=base /app/node_modules ./node_modules
+COPY . .
+#ENV NODE_ENV=production
+RUN npm run build
+
+###Stage 3###
+FROM node:18.18.2-alpine as runner
+WORKDIR /app
+#ENV NODE_ENV production
+RUN addgroup --system --gid 1012 nodejs && adduser --system --uid 1012 nextjs
+
+COPY --from=builder --chown=nextjs:nodejs /app/.next ./.next
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules
+COPY --from=builder --chown=nextjs:nodejs /app/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/package.json ./package.json
+
+USER 1012
+EXPOSE 3000
+
+#CMD npm run dev
+CMD ["npm", "start"]

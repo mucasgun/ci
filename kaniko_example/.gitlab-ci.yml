@@ -1,0 +1,57 @@
+default:
+  tags:
+    - specif_runner8
+
+variables:
+  DEPLOY_BRANCH: Develop
+  DP_LOGIN: gitlab+deploy-token-13
+  DP_URL: docker.infra.cloveri.com
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: never
+    - if: $CI_COMMIT_BRANCH == $DEPLOY_BRANCH
+
+stages:
+  - build
+#  - deploy  
+
+build_images:
+  stage: build
+   image:
+    name: gcr.io/kaniko-project/executor:debug
+    entrypoint: [""]
+  script:
+    - echo $CI_PROJECT_DIR
+    - echo $CI_REGISTRY
+    - $CI_REGISTRY_USER
+    - echo "{\"auths\":{\"$DP_URL\":{\"username\":\"$DP_LOGI\",\"password\":\"$DEPLOY_TOKEN13\"}}}" > /kaniko/.docker/config.json
+    - /kaniko/executor --context $CI_PROJECT_DIR --dockerfile $CI_PROJECT_DIR/Dockerfile --destination $CI_REGISTRY_IMAGE:$CI_COMMIT_TAG
+  
+    - set -x
+    - docker info
+    - sleep 10
+    - docker login --username "${DP_LOGIN}" --password "${DEPLOY_TOKEN13}" "${DP_URL}"
+    #- docker login --username ${DP_LOGIN} --password "${DEPLOY_TOKEN13}" "$CI_REGISTRY"
+    - ls -lah 
+    #- docker-compose build docker.infra.cloveri.com/liubov.zakharova/step
+    - docker build --tag ${DP_URL}/${CI_PROJECT_PATH}:latest .
+    #- ls -lah
+    - docker images
+    - docker push ${DP_URL}/${CI_PROJECT_PATH}:latest
+
+
+
+
+
+build:
+  stage: build
+  image:
+    name: gcr.io/kaniko-project/executor:debug
+    entrypoint: [""]
+  script:
+    - echo "{\"auths\":{\"$CI_REGISTRY\":{\"username\":\"$CI_REGISTRY_USER\",\"password\":\"$CI_REGISTRY_PASSWORD\"}}}" > /kaniko/.docker/config.json
+    - /kaniko/executor --context $CI_PROJECT_DIR --dockerfile $CI_PROJECT_DIR/Dockerfile --destination $CI_REGISTRY_IMAGE:$CI_COMMIT_TAG
+  only:
+    - tags

@@ -1,0 +1,83 @@
+default:
+  tags:
+    - specif_runner8
+
+variables:
+  DEPLOY_BRANCH_STAGE: stage
+  DEPLOY_BRANCH_PROD: prod
+  DP_PASS: ${DEPLOY_TOKEN22}
+  DP_LOGIN: gitlab+deploy-token-22
+  DP_URL: docker.infra.cloveri.com
+  DP_IMAGE: ${DP_URL}/${CI_PROJECT_PATH}/stage:latest  
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: never
+    - if: $CI_COMMIT_BRANCH == $DEPLOY_BRANCH_STAGE || $CI_COMMIT_BRANCH == $DEPLOY_BRANCH_PROD
+
+stages:
+  - build
+  - deploy  
+
+.build_image_tmpl: &job_build_images_config
+  stage: build
+  image: docker:24.0.7
+  services:
+    - docker:dind
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+    DOCKER_DRIVER: overlay2
+  script:
+    - docker login --username "${DP_LOGIN}" --password "${DP_PASS}" "${DP_URL}"
+    - docker build --tag ${DP_IMAGE} .
+    - docker push ${DP_IMAGE}
+
+build_image_stage:      
+  <<: *job_build_images_config
+  rules:
+    - if: $CI_COMMIT_BRANCH == $DEPLOY_BRANCH_STAGE  
+
+build_image_prod:
+  <<: *job_build_images_config
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+    DOCKER_DRIVER: overlay2
+    DP_IMAGE: ${DP_URL}/${CI_PROJECT_PATH}/prod:latest
+  rules:
+    - if: $CI_COMMIT_BRANCH == $DEPLOY_BRANCH_PROD
+
+      
+deploy_to_stage:
+  stage: deploy
+  image: alpine:3.18
+  variables:
+    HOST: 10.0.0.33
+    USERNAME: deploy_user
+    COMPOSE_PATH: /home/${USERNAME}/backend/users
+  rules:
+    - if: $CI_COMMIT_BRANCH == $DEPLOY_BRANCH_STAGE
+  before_script:
+    - apk update && apk add openssh-client gettext
+    - eval $(ssh-agent -s)
+    - echo "${SSH_PRIVATE_KEY}" | tr -d '\r' | ssh-add - > /dev/null
+    - mkdir -p ~/.ssh
+    - chmod -R 700 ~/.ssh
+    - ls -lah ~/.ssh
+    - '[[ -f /.dockerenv ]] && echo -e "Host *\n\tStrictHostKeyChecking no\n\n" > ~/.ssh/config'
+  script:
+    - echo "Deploying backend ${CI_COMMIT_SHA} from ${CI_COMMIT_REF_NAME} to stage server"
+    - envsubst < docker-compose.tmpl > docker-compose.yml  
+    - envsubst < .env.tmpl > .env.dev  
+    - scp docker-compose.yml ${USERNAME}@${HOST}:${COMPOSE_PATH}
+    - scp .env.dev ${USERNAME}@${HOST}:${COMPOSE_PATH}  
+    - ssh ${USERNAME}@${HOST} "cd ${COMPOSE_PATH};
+      docker login -u $DP_LOGIN --password ${DP_PASS} $DP_URL;
+      docker-compose down;
+      docker rmi ${DP_IMAGE};
+      docker pull ${DP_IMAGE};
+      docker-compose up -d"
+  dependencies: 
+    - build_image_stage

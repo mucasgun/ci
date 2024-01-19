@@ -1,0 +1,150 @@
+default:
+  tags:
+    - specif_runner8
+
+variables:
+  DEPLOY_BRANCH_STAGE: stage
+  DEPLOY_BRANCH_PROD: prod
+  DP_PASS: ${DEPLOY_TOKEN15}
+  DP_LOGIN: gitlab+deploy-token-15
+  DP_URL: docker.infra.cloveri.com
+  DP_IMAGE: ${DP_URL}/${CI_PROJECT_PATH}/stage:latest  
+
+
+workflow:
+  rules:
+    #не запускаем на merge_request, только на изменениях
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: never
+    - if: $CI_COMMIT_BRANCH == $DEPLOY_BRANCH_STAGE || $CI_COMMIT_BRANCH == $DEPLOY_BRANCH_PROD
+
+
+#сейчас вся статика билдится и пакуется в контейнер с nginx      
+stages:
+  - build
+    #  - publish
+  - deploy  
+
+
+#эта джоба была для постоения статики для тестового сервера     
+.build_artifact:
+  stage: build
+  before_script:
+    - npm install --maxsockets=1
+  script:
+    - echo ${CI_JOB_NAME}
+    - echo ${CI_COMMIT_SHA}
+    - npm run build
+    - tar -cvzf build_${CI_COMMIT_SHORT_SHA}.tar.gz build
+    - ls -lah
+  artifacts:
+    name: ${CI_JOB_NAME}${CI_COMMIT_SHORT_SHA}
+    when: on_success
+    expire_in: 1 day
+    paths:
+      - ./*.tar.gz
+      - ./build
+
+#тут статика как артифакт из предыдущей джобы публиковалась в Package Registry         
+.publish_in_registry:
+  stage: publish
+  image: curlimages/curl:8.4.0
+  variables:
+    LOGIN: gitlab+deploy-token-15:${DEPLOY_TOKEN15}
+    URL: ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/${CI_PROJECT_NAME}/0.0.2
+    # каждую итерацию пока делаю с новой версией пакетов
+  script:
+    - PACKAGE_FILE=$(ls | grep *.tar.gz)
+    - http_response=$(curl --user ${LOGIN} --upload-file ${PACKAGE_FILE} ${URL}/${PACKAGE_FILE} | head -n 1 | cut -b 13,14,15) && if [ $http_response != '201' ]; then exit 1; fi
+  dependencies: 
+    - build_artifact
+
+.build_images_tmpl: &job_build_images_config
+  stage: build
+  image: docker:24.0.7
+  services:
+    - docker:dind
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+    DOCKER_DRIVER: overlay2
+  before_script:
+    - apk update && apk add gettext
+    - envsubst < .env.dev.tmpl > .env
+  script:
+    - docker login --username "${DP_LOGIN}" --password "${DP_PASS}" "${DP_URL}"
+    - ls -lah 
+    - docker build --tag ${DP_IMAGE} .
+    - docker images
+    - docker push ${DP_IMAGE}
+
+build_images_dev:      
+  <<: *job_build_images_config
+  rules:
+    - if: $CI_COMMIT_BRANCH == $DEPLOY_BRANCH_STAGE
+
+build_images_prod:
+  <<: *job_build_images_config
+  variables:
+    DP_IMAGE: ${DP_URL}/${CI_PROJECT_PATH}/prod:latest
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+    DOCKER_DRIVER: overlay2
+  rules:
+    - if: $CI_COMMIT_BRANCH == $DEPLOY_BRANCH_PROD
+  before_script:
+    - apk update && apk add gettext
+    - envsubst < .env.prod.tmpl > .env
+
+
+# эта джоба была для деплоя статики на тестовый сервер     
+.deploy_to_stage:
+  stage: deploy
+  image: alpine:3.18
+  variables:
+    HOST: 10.0.0.33
+    USERNAME: deploy_user
+  before_script:
+    - apk update && apk add openssh-client rsync
+    - 'which ssh-agent || ( apt-get install -qq openssh-client )'
+    - eval $(ssh-agent -s)
+    - echo "${SSH_PRIVATE_KEY}" | tr -d '\r' | ssh-add - > /dev/null
+    - mkdir -p ~/.ssh
+    - chmod -R 700 ~/.ssh
+    - ls -lah ~/.ssh
+    - '[[ -f /.dockerenv ]] && echo -e "Host *\n\tStrictHostKeyChecking no\n\n" > ~/.ssh/config'
+  script:
+    - echo "Deploying ${CI_COMMIT_SHA} from ${CI_COMMIT_REF_NAME} to stage server"
+    - rsync -avrt --progress --human-readable --delete ./build/ ${USERNAME}@${HOST}:/var/www/html/points/
+  dependencies: 
+    - build_artifact
+
+deploy_container_to_stage:
+  stage: deploy
+  image: alpine:3.18
+  variables:
+    HOST: 10.0.0.33
+    USERNAME: deploy_user
+    COMPOSE_PATH: /home/${USERNAME}/frontend/step_front
+  rules:
+    - if: $CI_COMMIT_BRANCH == $DEPLOY_BRANCH_STAGE
+  before_script:
+    - apk update && apk add openssh-client gettext
+    - eval $(ssh-agent -s)
+    - echo "${SSH_PRIVATE_KEY}" | tr -d '\r' | ssh-add - > /dev/null
+    - mkdir -p ~/.ssh
+    - chmod -R 700 ~/.ssh
+    - ls -lah ~/.ssh
+    - '[[ -f /.dockerenv ]] && echo -e "Host *\n\tStrictHostKeyChecking no\n\n" > ~/.ssh/config'
+  script:
+    - echo "Deploying backend ${CI_COMMIT_SHA} from ${CI_COMMIT_REF_NAME} to stage server"
+    - envsubst < docker-compose.tmpl > docker-compose.yml  
+    - scp docker-compose.yml ${USERNAME}@${HOST}:${COMPOSE_PATH}
+    - ssh ${USERNAME}@${HOST} "cd ${COMPOSE_PATH};
+      docker login -u $DP_LOGIN --password ${DP_PASS} $DP_URL;
+      docker-compose down;
+      docker rmi ${DP_IMAGE};
+      docker pull ${DP_IMAGE};
+      docker-compose up -d"
+  dependencies: 
+    - build_images_dev      

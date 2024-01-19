@@ -1,0 +1,8 @@
+version: '3.3'
+services:
+  nextjs_service:     
+    container_name: nextjs_app     
+    image: ${DP_IMAGE}
+    restart: unless-stopped
+    ports:
+      - "3000:3000"

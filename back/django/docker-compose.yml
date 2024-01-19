@@ -1,0 +1,12 @@
+version: '3.3'
+
+services:
+  users_web:
+#    build: .
+    container_name: users_web
+    image: docker.infra.cloveri.com/cloveri.start/step/users/prod:latest  
+    restart: unless-stopped
+    ports:
+      - 8004:8004
+    env_file:
+      - ./.env.dev
