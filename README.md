@@ -33,7 +33,8 @@
 
 
 Пример сетевой связанности для тестового стенда.
-![nginx_sevices2](https://github.com/mucasgun/ci/assets/128498037/9b1f6039-27f1-4d62-8a2e-bdb4c4b61eb3)
+![nginx_scheme_mydomen](https://github.com/mucasgun/ci/assets/128498037/b19e4b95-ba7f-461b-89b9-e9c0700d2c0d)
+
 
 
 [up](#up)
