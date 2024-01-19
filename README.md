@@ -343,6 +343,8 @@ docker rmi docker.mydomen.com/mydomen.start/step/re_step:latest
 
 В конфигурацию nginx добавить client_max_body_size 60M;
 
+[Пример конфиг файла](https://github.com/mucasgun/ci/blob/main/nginx_v2.conf) 
+
 [up](#up)
 
 # <a name="images">Сборка образов вручную</a>
